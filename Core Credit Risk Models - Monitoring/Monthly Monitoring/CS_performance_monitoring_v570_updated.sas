@@ -1,0 +1,1963 @@
+OPTIONS NOSYNTAXCHECK ;
+options compress = yes;
+options mstored sasmstore=sasmacs; 
+
+%include "\\neptune\sasa$\SAS_Automation\SAS_Autoexec\autoexec2.sas";
+
+%include "\\mpwsas64\Core_Credit_Risk_Models\V5\V5 Monitoring\Performance Monitoring\macros\Calc_Gini.sas";
+%include "\\mpwsas64\Core_Credit_Risk_Models\V5\V5 Monitoring\Performance Monitoring\macros\CreateMonthlyGini.sas";
+%include "\\mpwsas64\Core_Credit_Risk_Models\V5\V5 Monitoring\Performance Monitoring\macros\giniovertime.sas";
+%include "\\mpwsas64\Core_Credit_Risk_Models\V5\V5 Monitoring\Performance Monitoring\macros\checkifcolumnsexist.sas";
+
+libname decile "\\mpwsas64\Core_Credit_Risk_Models\V5\V5 Monitoring\SAS Decile Tables\CS V570";
+libname comp "\\mpwsas64\Core_Credit_Risk_Models\V5\V5 Monitoring\Performance Monitoring\Compuscan Monitoring\V570";
+libname comp1 "\\mpwsas64\Core_Credit_Risk_Models\V5\V5 Monitoring\Performance Monitoring\data";
+libname comp3 "\\mpwsas64\Core_Credit_Risk_Models\V5\V5 Monitoring\Performance Monitoring\Compuscan Monitoring";
+libname V5 '\\mpwsas64\Core_Credit_Risk_Models\V5\V5 Monitoring\Performance Monitoring\data';
+libname lookup '\\mpwsas64\Core_Credit_Risk_Models\V5\Segmentation Models For Compuscan\lookup';
+Libname Data1 "\\mpwsas64\Core_Credit_Risk_Models\V5\V5 Monitoring\Performance Monitoring\Compuscan Monitoring\V570\App Seg1 Model";
+Libname Data2 "\\mpwsas64\Core_Credit_Risk_Models\V5\V5 Monitoring\Performance Monitoring\Compuscan Monitoring\V570\App Seg2 Model";
+Libname Data3 "\\mpwsas64\Core_Credit_Risk_Models\V5\V5 Monitoring\Performance Monitoring\Compuscan Monitoring\V570\App Seg3 Model";
+Libname Data4 "\\mpwsas64\Core_Credit_Risk_Models\V5\V5 Monitoring\Performance Monitoring\Compuscan Monitoring\V570\App Seg4 Model";
+Libname Data5 "\\mpwsas64\Core_Credit_Risk_Models\V5\V5 Monitoring\Performance Monitoring\Compuscan Monitoring\V570\App Seg5 Model";
+Libname seg1 "\\mpwsas64\Core_Credit_Risk_Models\V5\V5 Monitoring\Performance Monitoring\Compuscan Monitoring\App Seg1 Model\Data";
+Libname seg2 "\\mpwsas64\Core_Credit_Risk_Models\V5\V5 Monitoring\Performance Monitoring\Compuscan Monitoring\App Seg2 Model\Data";
+Libname seg3 "\\mpwsas64\Core_Credit_Risk_Models\V5\V5 Monitoring\Performance Monitoring\Compuscan Monitoring\App Seg3 Model\Data";
+Libname seg4 "\\mpwsas64\Core_Credit_Risk_Models\V5\V5 Monitoring\Performance Monitoring\Compuscan Monitoring\App Seg4 Model\Data";
+Libname seg5 "\\mpwsas64\Core_Credit_Risk_Models\V5\V5 Monitoring\Performance Monitoring\Compuscan Monitoring\App Seg5 Model\Data";
+Libname Kat "\\mpwsas64\Core_Credit_Risk_Models\V5\Application Scorecard\TU Models\v570\Calibration";
+Libname tu '\\mpwsas64\Core_Credit_Risk_Models\V5\V5 Monitoring\Performance Monitoring\Transunion Monitoring\datasets';
+
+%let odbc = MPWAPS;
+
+data _null_;
+     call symput("enddate",cats("'",put(intnx('month',today(),-1,'end'),yymmddd10.),"'"));
+     call symput("startdate",cats("'",put(intnx('month',today(),-13,'end'),yymmddd10.),"'"));
+     call symput("actual_date", put(intnx("month", today(),-9,'end'),date9.));
+     call symput("month", put(intnx("month", today(),-1,'end'),yymmn6.));
+     call symput("prevmonth", put(intnx("month", today(),-2,'end'),yymmn6.));
+	 call symput("prevprevmonth", put(intnx("month", today(),-3,'end'),yymmn6.));
+	 call symput("reject_month", put(intnx("month", today(),-7,'end'),yymmn6.));
+	 call symput("build_start", put(intnx("month", today(),-12,'end'),yymmn6.));
+	 call symput("build_end", put(intnx("month", today(),-7,'end'),yymmn6.));
+run;
+
+/*** Check dates ***/
+%put &startdate; 		*Monitoring month minus a year;
+%put &enddate; 			*Monitoring month (last day of month);
+%put &actual_date; 		*Monitoring month minus 9 months;
+%put &month; 			*Monitoring month (month);
+%put &prevmonth; 		*Monitoring month minus a month;
+%put &prevprevmonth; 	*Monitoring month minus 2 months;
+%put &reject_month; 	*Monitoring month minus 7 months;
+%put &build_start; 		*Monitoring month minus 12 months;
+%put &build_end; 		*Monitoring month minus 7 months;
+
+%create_scorecard_variables_list(numberofsegments=1, modeltype=C);
+%create_scorecard_variables_list(numberofsegments=2, modeltype=C);
+%create_scorecard_variables_list(numberofsegments=3, modeltype=C);
+%create_scorecard_variables_list(numberofsegments=4, modeltype=C);
+%create_scorecard_variables_list(numberofsegments=5, modeltype=C);
+
+%let vlist=  CS_V570_prob Seg comp_seg applicationdate comp_thin appmonth &segment_1_list_woe &segment_2_list_woe &segment_3_list_woe  &segment_4_list_woe &segment_5_list_woe ;
+%let vlistcommasep= %do_over(values = &vlist, phrase = ?,between=comma);
+
+proc sql stimer;
+	connect to ODBC (dsn=&odbc);
+	create table Applicationbase_&month as 
+	select * from connection to odbc ( 
+		select &vlistcommasep
+		from 	DEV_DataDistillery_General.dbo.CS_applicationbase
+		where appmonth>=&startdate.
+	) ;
+	disconnect from odbc ;
+quit;
+
+proc sql stimer;
+	connect to ODBC (dsn=&odbc);
+	create table disbursedbase_&month as 
+	select * from connection to odbc ( 
+		select *		
+		from 	DEV_DataDistillery_General.dbo.disbursedbase_&month
+	) ;
+	disconnect from odbc ;
+quit;
+
+proc format cntlin =decile._decile1_ fmtlib ;run; 
+proc format cntlin =decile._decile2_ fmtlib ;run;
+proc format cntlin =decile._decile3_ fmtlib ;run;
+proc format cntlin =decile._decile4_ fmtlib ;run;
+proc format cntlin =decile._decile5_ fmtlib ;run;
+
+data Applicationbase_&month;
+	set Applicationbase_&month;
+	seg = comp_seg;
+	thinfileindicator = comp_thin;
+	Score = 1000-(CS_V570_prob*1000);  
+	if comp_seg = 1 then decile = put(Score,s1core.);
+	else if comp_seg = 2 then decile = put(Score,s2core.);
+	else if comp_seg = 3 then decile = put(Score,s3core.);
+	else if comp_seg = 4 then decile = put(Score,s4core.);
+	else if comp_seg = 5 then decile = put(Score,s5core.);
+	decile_b = put(input(decile,8.)+1,z2.);
+	decile_w =input(decile,8.)+1;
+	decile_s = decile_w;
+run;
+
+proc sql;
+    create table Disbursedbase_&month as
+        select *, ((Principaldebt/sum(Principaldebt)) * count(tranappnumber)) as weight
+        from Disbursedbase_&month;
+quit;
+
+%macro Loopthroughcal(Dset,name=,prob=, weight=);
+	proc nlmixed data=&Dset ; parms a=1 c=0;
+		x=1/(1+((&prob/(1-&prob))**(-a))*exp(c) );
+		MODEL Target ~ BINARY(x);
+		_ll = _ll*&weight;
+		ODS OUTPUT ParameterEstimates= parameters (keep = Parameter Estimate);
+	run;
+
+	proc transpose data = parameters out = parameters ;
+		var Estimate ;
+		id Parameter ;
+	run;
+
+	data parameters (drop = _NAME_ ) ;
+		set parameters ;
+		Model = "&Name";
+		Count = 1;
+	run;
+
+	proc append base = Parameters_&name data = parameters force ;
+	quit;
+%mend;
+%Loopthroughcal(Dset=Disbursedbase_&month, name=V637_Calib, prob=V635, weight=weight);
+
+proc sql;
+	create table Disbursedbase_&month
+		as select a.*,
+		1/(1+(V635/(1-V635))**(-1*(c.a))*exp(c.c)) as V637
+		from Disbursedbase_&month a
+		left join parameters_V637_calib c
+		on a.count=c.count;
+quit;
+proc freq data=Applicationbase_&month; tables decile_s / missing; run;
+
+data disb1 disb2 disb3 disb4 disb5;
+	set Disbursedbase_&month;
+	if comp_seg = 1 then output disb1;
+	else if comp_seg = 2 then output disb2;
+	else if comp_seg = 3 then output disb3;
+	else if comp_seg = 4 then output disb4;
+	else if comp_seg = 5 then output disb5;
+	where maxSCORECARDVERSION <> 'V4';
+run;
+
+%create_scorecard_variables_list(numberofsegments=1, modeltype=C);
+%create_scorecard_variables_list(numberofsegments=2, modeltype=C);
+%create_scorecard_variables_list(numberofsegments=3, modeltype=C);
+%create_scorecard_variables_list(numberofsegments=4, modeltype=C);
+%create_scorecard_variables_list(numberofsegments=5, modeltype=C);
+
+/*/***************************************************************************************/*/
+/*/*********************************** Data preparation **********************************/*/
+/*/***************************************************************************************/*/
+/*------------------------------------------------------------------*/
+/* Change Control: */
+/*------------------------------------------------------------------*/
+/* Developer: Lindokuhle Masina */
+/* Date: 30 June 2021*/
+/*
+Changes Made:
+1.Removing the rejets
+*/
+/* Reason: Our reject inference model has broken due to us not receiving information on the OM. 
+	In the mean time can we change our monitoring to only be on Disbursals and not with rejects included*/
+/*------------------------------------------------------------------*/;
+
+Data comp.NewAppbase_&month ;
+	set Applicationbase_&month(where =(ApplicationDate > &startdate));
+	month = put(input(ApplicationDate,yymmdd10.),yymmn6.);
+	appmonth = put(input(ApplicationDate,yymmdd10.),yymmn6.);
+	CS_V570_Score = score;
+run;
+
+proc freq data = comp.NewAppbase_&month;
+	tables appmonth;
+run;
+
+proc sql;
+	create table comp.Build_6Months as
+		select *
+		from comp.Newappbase_&month
+		where put(input(applicationdate,yymmdd10.),yymmn6.) >= "&build_start" and put(input(applicationdate,yymmdd10.),yymmn6.) <= "&build_end"; 
+quit;
+
+proc freq data = comp.Build_6Months;
+	tables appmonth;
+run;
+
+
+%macro datapreparation(applicationbase=,numberofsegment=);
+	%do seg = 1 %to &numberofsegment;
+	    proc sql;
+			create table _estimates_ as
+			    select a.*, b.estimate 
+			    from _estimates_&seg. a left join data&seg.._estimates_ b
+			    on UPCASE(a.parameter) = UPCASE(tranwrd(b.parameter,"_W",""));
+	    quit;
+
+	    filename _temp_ temp;
+	    data _null_;
+			set _estimates_;
+			where upcase(parameter) not in ("DECILE","INTERCEPT");
+			file _temp_;
+			formula1 = cats(parameter,'_S = ',parameter,'_W*',Estimate,';');
+			formula2 = cat('if ', compress(parameter),'_S = . then delete;');
+			put formula1;
+			put formula2;
+	    run;
+
+	    data segment_&seg.;
+			set &applicationbase(where= (comp_seg=&seg));
+			month = put(input(ApplicationDate,yymmdd10.),yymmn6.);
+			if comp_seg = 1 then decile = put(CS_V570_Score,s1core.);
+			else if comp_seg = 2 then decile = put(CS_V570_Score,s2core.);
+			else if comp_seg = 3 then decile = put(CS_V570_Score,s3core.);
+			else if comp_seg = 4 then decile = put(CS_V570_Score,s4core.);
+			else if comp_seg = 5 then decile = put(CS_V570_Score,s5core.);
+			decile_b = put(input(decile,8.)+1,z2.);
+			decile_w =input(decile,8.)+1;
+			decile_s = decile_w;
+			count=1;
+			segment = seg;
+			%include _temp_;
+			keep month seg comp_seg &&segment_&seg._list_woe  &&segment_&seg._list_S Decile_W Decile_S;
+	    run;
+
+	    data build_&seg. build&seg.;
+			set comp.Build_6Months(where= (comp_seg=&seg) drop= decile);
+			if comp_seg = 1 then decile = put(CS_V570_Score,s1core.);
+			else if comp_seg = 2 then decile = put(CS_V570_Score,s2core.);
+			else if comp_seg = 3 then decile = put(CS_V570_Score,s3core.);
+			else if comp_seg = 4 then decile = put(CS_V570_Score,s4core.);
+			else if comp_seg = 5 then decile = put(CS_V570_Score,s5core.);
+			decile_b = put(input(decile,8.)+1,z2.);
+			decile_w =input(decile,8.)+1;
+			decile_s = decile_w;
+			Month = put(datepart(ApplicationDate),yymmn6.);
+
+			count=1;
+			%include _temp_;
+			keep month seg comp_seg &&segment_&seg._list_woe  &&segment_&seg._list_S Decile_W Decile_S;
+	    run;
+
+	    data disb&seg.;
+			set disb&seg.;
+			month2 = put(input(ApplicationDate,yymmdd10.),yymmn6.);
+			Month = put(datepart(FirstDueMonth),yymmn6.);
+			decile_b = put(input(decile,8.)+1,z2.);
+			decile_w =input(decile,8.)+1;
+			decile_s = decile_w;
+			count=1;
+			%include _temp_;
+	    run;
+	%end;
+%mend;
+%datapreparation(applicationbase=comp.NewAppbase_&month, numberofsegment=5);
+
+/***************************************************************************************/
+/*********************************** PSI Calculations **********************************/
+/***************************************************************************************/
+%macro psi_calculation_monitoring(build=, base=,period=month,var=,psi_var=, outputdataset=) ;
+/*	%if %VarExist(&build, &psi_var)=1 and %VarExist(&base, &psi_var)=1 and %VarExist(&base, &period)=1 %then %do;*/
+	proc freq data = &base;
+		tables &period*&psi_var / missing outpct out=basetable(keep =&period &psi_var pct_row rename =(pct_row = percent));
+	run;
+	proc freq data = &build;
+		tables &psi_var /missing out=buildtable(keep=&psi_var percent);
+	run;
+	data buildtable;
+		set buildtable;
+		binnumber=_n_;
+	run;
+	proc sql;
+		create table basetable2 as
+			select distinct  *
+			from basetable a full join  buildtable(keep = &psi_var binnumber)  b
+			on a.&psi_var = b.&psi_var
+			;
+	quit;
+	proc sort data = basetable2;
+		by &period &psi_var;
+	run;
+	proc transpose data = basetable2 out = psitrans prefix = bin ;	
+		by &period;
+		id binnumber;
+		var percent;
+	run;
+	proc transpose data = buildtable out = buildtrans prefix = build;
+		var percent;
+	run;
+	proc sql; select count(distinct &psi_var) into : numBuckets separated by "" from buildtable; quit;
+	proc sql;
+		create table all_psi as
+		   select *
+		   from psitrans , buildtrans;
+	quit;
+	data all_psi_results(keep = Variablename &period psi marginal_stable unstable);
+		set all_Psi;
+		length variablename $32.;
+		array pred [&numBuckets] bin1 - bin&numBuckets;
+		array build [&numBuckets] build1 - build&numBuckets;
+		item = 0;
+		do p = 1 to &numBuckets;
+		  item = sum(item,(pred[p]-build[p])*(log(pred[p]/build[p])));
+		end;
+		psi = item/100;
+		marginal_stable = 0.1;
+		unstable=0.25;
+		variablename = tranwrd(upcase("&var."),"_W","");
+	run;
+	
+	data buildset ;
+		set buildtable(rename=(&psi_var =scores));
+		length variablename $32.;
+		&period =" BUILD";
+		psi=.;
+		marginal_stable=.;
+		unstable=.;
+		variablename=tranwrd(upcase("&var."),"_W","");
+	run;
+	proc sql;
+		create table summarytable(rename=(&psi_var=scores)) as
+			select *
+			from basetable(keep = &period &psi_var percent) a inner join all_psi_results b
+			on a.&period = b.&period;
+	quit;
+	data summarytable;
+		set summarytable(rename =(&period=newperiod));
+		length &period $6.;
+		&period=put(newperiod,6.);
+		drop newperiod;
+	run;
+	proc append base = &outputdataset data = summarytable force; run;
+	proc append base = &outputdataset data = buildset force; run;
+	proc datasets lib = work;
+        delete buildset all_psi_results summarytable basetable basetable2 all_psi psitrans buildtrans buildtable ;
+  	run;quit;
+%mend;
+  
+/***************************************************************************************/
+/**************************** Trend Over Time Calculations *****************************/
+/***************************************************************************************/
+%looppervariables_monitoring(segment=1,base=segment_1, build1=build_1,variable_list=&segment_1_list decile, outdataset=summarytable);
+%looppervariables_monitoring(segment=2,base=segment_2, build1=build_2,variable_list=&segment_2_list decile,outdataset=summarytable);
+%looppervariables_monitoring(segment=3,base=segment_3, build1=build_3,variable_list=&segment_3_list decile,outdataset=summarytable);
+%looppervariables_monitoring(segment=4,base=segment_4, build1=build_4,variable_list=&segment_4_list decile,outdataset=summarytable);
+%looppervariables_monitoring(segment=5,base=segment_5, build1=build_5,variable_list=&segment_5_list decile,outdataset=summarytable);
+
+data all_segments;
+	set comp.NewAppbase_&month(keep = month seg);
+run;
+data overallbuild;
+	set build_1(keep = comp_seg) build_2(keep = comp_seg) build_3(keep = comp_seg) build_4(keep = comp_seg) build_5(keep = comp_seg) ;
+	seg = comp_seg;
+run;
+%psi_calculation_monitoring(build=overallbuild, base=all_segments,period=month,var=seg,psi_var=seg, outputdataset=summarytable_&month);
+
+%Macro PSIRenaming (seg);
+	proc delete data = all_summarytable ; run;
+	proc delete data = segments; run;
+	%do i= 1 %to &seg;
+		data summarytable_&i;
+			set summarytable_&i;
+			label scores = 'Scores';
+		run;
+		Proc sql;
+			create table PSI_&i. as
+				select a.* ,b.scorecardvariable
+				from summarytable_&i. a
+				left join _estimates_&i. b
+				on upcase(a.variablename) = upcase(b.Parameter);
+		quit;
+		proc append base = all_summarytable data = psi_&i force; run;
+/*		proc append base = segments data = segment_&i force ; run;*/
+	%end;
+%mend;
+%PSIRenaming(5);
+
+%let segment_0_list = DECILE;
+%let segment_0_list_woe = DECILE_W;
+%let segment_0_list_buckets = DECILE_B;
+%let segment_0_list_S = DECILE_S;
+
+data decile_segment;
+	set comp.NewAppbase_&month(keep = month decile_w decile_s);
+run;
+data decilebuild;
+	set build_1(keep = decile_w decile_s seg) build_2(keep = decile_w decile_s seg) 
+		build_3(keep = decile_w decile_s seg) build_4(keep = decile_w decile_s seg) build_5(keep = decile_w decile_s seg) ;
+run;
+
+%macro looppervariables(segment=0,base=,build1=,variable_list=,outdataset=);
+	data segment;
+		set &base.;
+	run;
+	proc delete data = &outdataset._&segment; run;
+
+	%do i = 1 %to %sysfunc(countw(&variable_list));
+		%let vari = %scan(&variable_list, &i.);
+		%psi_calculation_monitoring(build=&build1, base=segment,period=month,var=&vari,psi_var=&vari._S, outputdataset=&outdataset._&segment);
+		data &outdataset._&segment;
+			set &outdataset._&segment;
+			seg = &segment;
+		run;
+	%end;
+%mend;
+%looppervariables(segment=0,base=decile_segment, build1=decilebuild,variable_list=&segment_0_list decile,outdataset=summarytable);
+
+%macro appendPSI(outdataset=);
+	proc delete data = &outdataset; run;
+	%do i = 1 %to 5;
+		proc sql;
+			create table _tempPSI_ as
+			   select &i as segment, b.scorecardvariable as variable_name, a.*
+			   from (select * from summarytable_&i) a left join _estimates_&i b
+			   on  upcase(a.variablename) = (b.Parameter);
+		quit;
+		proc append base = &outdataset  data=_tempPSI_ force; run;
+	%end;
+
+	data _tempPSI_;
+		set summarytable_0;
+		length variable_name $32.;
+		variable_name ="DECILE";
+		segment = &i.;
+	run;
+	proc append base = &outdataset  data=_tempPSI_ force; run;
+%mend;
+proc delete data = comp.Variables_Distribution_&month.; run;
+%appendPSI(outdataset =comp.Variables_Distribution_&month.); 
+
+/*** Creating CSI table ***/
+%macro Create3MonthPsiReport();
+	proc sql;
+		create table max_psi as
+			select  seg,variablename, max(psi) as psi
+			from Comp.Variables_Distribution_&month.
+			where variablename ne 'DECILE'
+			group by seg, variablename;
+	quit;
+
+	data max_psi;
+	     set max_psi;
+	     month = "max csi";
+	run;
+
+	proc sql;
+		create table last3month as 
+			select distinct month
+			from Comp.Variables_Distribution_&month.
+			where month ne ' BUILD'
+			order by month desc;
+	quit;
+	data last3month;  set last3month(obs=3); run;
+
+/*	proc sql;*/
+/*		select	distinct type  into : columntype */
+/*	  	from  dictionary.columns*/
+/*	  	where   upcase(libname) = 'COMP' and  upcase(memname) = "VARIABLES_DISTRIBUTION_&month." and upcase(name)='MONTH';*/
+/*	quit;*/
+
+	proc sql;
+		create table last3monthdata as
+			select  seg, a.month,variablename, psi
+			from (select * from Comp.Variables_Distribution_&month. where variablename ne 'DECILE' ) a
+			inner join  last3month b
+			on a.month = b.month;
+	quit;
+
+	data CSI_Distribution_&month.;
+		length month $8.;
+		set last3monthdata max_psi;
+	run;
+
+	proc sql;
+	    create table comp.CSI_Distribution_&month. as
+			select b.NAME as variable_name, a.*
+			from CSI_Distribution_&month. a 
+			left join Lookup.Compscanvar_lookup b
+			on upcase(a.variablename) = upcase(b.newcolumn)
+			order by a.seg, a.month desc;
+	quit;
+
+	Data comp.CSI_Distribution_&month.;
+		set comp.CSI_Distribution_&month.;
+		if variable_name = " " then variable_name = variablename;
+	run;
+
+	/*** Creating variables_stability table ***/
+	proc sort data = Comp.variables_distribution_&month(keep = Month) nodupkey out = last_2_month;
+	     by descending Month;
+	run;
+
+	data last_2_month;
+	     set last_2_month(obs = 2);
+	run;
+
+	proc sql;
+		create table variable_distribution as
+		   select a.month, a.segment, cats('Segment ',a.segment) as Population, 
+		             case when a.psi >=0.25 then 'Unstable %'
+		                   when a.psi >=0.1 then 'Marginally Unstable %'
+		                   else ' Stable %'
+		             end as Reason 
+		           ,count(distinct variablename) as numberofvariables
+		           ,avg(psi) as avg_psi
+		   from (select  * from Comp.Variables_distribution_&month where upcase(variablename) ne 'DECILE')  a, last_2_month b
+		   where a.month = b.month
+		   group by a.month, a.segment,3,4;
+	quit;
+
+	proc sql;
+		create table reason_month as
+		   select distinct a.month, 
+		             case when a.psi >=0.25 then 'Unstable %'
+		                   when a.psi >=0.1 then 'Marginally Unstable %'
+		                   else ' Stable %'
+		             end as Reason 
+		   from (select * from Comp.Variables_distribution_&month where upcase(variablename) ne 'DECILE')  a, last_2_month b
+		   where a.month = b.month
+		   and segment ne 0
+		   group by a.month, 2;
+	quit;
+
+	data reason_month2;
+		set last_2_month;
+		Reason = 'Unstable %';
+	run;
+
+	data reason_month3;
+	    set last_2_month;
+	    Reason = 'Marginally Unstable %';
+	run;
+
+	data reason_month4;
+	    set last_2_month;
+	    Reason = ' Stable %';
+	run;
+
+	proc append base=reason_month data= reason_month2; run;
+	proc append base=reason_month data= reason_month3; run;
+	proc append base=reason_month data= reason_month4; run;
+	proc sort data=reason_month noduprecs; by month Reason; run;
+
+	proc sql;
+		create table segments as
+		   select segment, count(distinct variablename) as total_variables 
+		   from Comp.Variables_distribution_&month
+		   where segment ne 0 and upcase(variablename) ne 'DECILE'
+		   group by segment;
+	quit;
+
+	proc sql;
+		create table reason2 as
+		   select *
+		   from reason_month a, segments b;
+	quit;
+
+	proc sort data = reason2;by month segment reason;run;
+	proc sort data = variable_distribution;	by month segment reason;run;
+
+	data comp.variables_stability_&month.;
+	     merge variable_distribution(in = a)
+	             reason2(in = b );
+	     by month segment reason;
+	     if b;
+	     if b and not a then numberofvariables=0;
+	     Population = cats('Segment ',segment);
+	     Stable_percentage = numberofvariables / total_variables;
+	run;
+%mend;
+proc delete data = comp.CSI_Distribution_&month.; run;
+proc delete data = comp.variables_stability_&month.; run;
+%Create3MonthPsiReport;
+
+/***************************************************************************************/
+/**************************** Trend Over Time Calculations *****************************/
+/***************************************************************************************/
+%PercentageSloping_Monitoring(inputdataset=disb1,listofvars=&segment_1_list_S,target=target, period=month, trendreporttable=Variables_trendreport_seg1,slopingreporttable=alltrendtable_seg1,segment=1);
+%PercentageSloping_Monitoring(inputdataset=disb2,listofvars=&segment_2_list_S,target=target, period=month, trendreporttable=Variables_trendreport_seg2,slopingreporttable=alltrendtable_seg2,segment=2);
+%PercentageSloping_Monitoring(inputdataset=disb3,listofvars=&segment_3_list_S,target=target, period=month, trendreporttable=Variables_trendreport_seg3,slopingreporttable=alltrendtable_seg3,segment=3);
+%PercentageSloping_Monitoring(inputdataset=disb4,listofvars=&segment_4_list_S,target=target, period=month, trendreporttable=Variables_trendreport_seg4,slopingreporttable=alltrendtable_seg4,segment=4);
+%PercentageSloping_Monitoring(inputdataset=disb5,listofvars=&segment_5_list_S,target=target, period=month, trendreporttable=Variables_trendreport_seg5,slopingreporttable=alltrendtable_seg5,segment=5);
+
+%macro AppendingSlopingTable (segment=,outdataset=);
+	proc sql;
+		create table _temptrendtable_ as
+			select b.scorecardvariable as variable_name, a.*
+			from Alltrendtable_seg&segment a left join _estimates_&segment b
+			on upcase(tranwrd(a.variable_name,"_S"," ")) = upcase(b.Parameter);
+	quit;
+	data trendtables_&segment (keep =variable_name segment slope_rate Recommended_Action);
+		set _temptrendtable_;
+		if upcase(variable_name) = "" then delete;
+		format Recommended_Action $500.;
+		segment = &segment.;
+		overall_threshold=overall_threshold/100;
+
+		label variable_name ="Variable Name" overall_threshold = "Slope Rate" Recommended_Action ="Recommended Action" ;
+		if overall_threshold >=0.8 then do;
+		   Recommended_Action = cats("No Action ");
+		end;
+		else if overall_threshold <0.8 then do;
+		   Recommended_Action =cats("Investigate if rebucketing or collapsing of bucket is required and Investigate if variable should be removed");
+		end;
+		rename overall_threshold = slope_rate;
+	run;
+
+	proc sql;
+	   	create table Variables_trendreport_seg&segment as
+			select b.scorecardvariable as variable_name, a.*
+			from Variables_trendreport_seg&segment a left join _estimates_&segment b
+			on upcase(tranwrd(a.VarName,"_S"," ")) = upcase(b.Parameter);
+	quit;
+
+	data Variables_trendreport_seg&segment;
+		set Variables_trendreport_seg&segment;
+		if upcase(VarName) = "DECILE_S" then delete;
+		if variable_name = " " then variable_name = upcase(tranwrd(VarName,"_S"," "));
+	run;
+	proc append base = comp.Variables_trendreport_&month data = Variables_trendreport_seg&segment force; run;
+	proc append base = &outdataset data = trendtables_&segment force; run;
+%Mend;
+%AppendingSlopingTable (segment=1,outdataset=comp.v5_sloperate_&month);
+%AppendingSlopingTable (segment=2,outdataset=comp.v5_sloperate_&month);
+%AppendingSlopingTable (segment=3,outdataset=comp.v5_sloperate_&month);
+%AppendingSlopingTable (segment=4,outdataset=comp.v5_sloperate_&month);
+%AppendingSlopingTable (segment=5,outdataset=comp.v5_sloperate_&month);
+
+/***************************************************************************************/
+/****************************** Contribution Calculations ******************************/
+/***************************************************************************************/
+
+%Macro T ();
+	proc delete data = contrib; run;
+	%do seg = 1 %to 5;
+		proc delete data =VARIABLECONTRIBUTIONS VAR SEG&seg._CONTRIB; run;
+		%ContribCalc_Montoring(Data&seg..Parameter_estimate, DISB&seg, SEG&seg._CONTRIB);
+		data Comp.Seg&seg._contrib;
+			set work.seg&seg._contrib; 
+			segment = &seg;
+		run;
+		proc append base = contrib data=comp.seg&seg._contrib force; run;
+	%end;
+	proc sql;
+		create table contrib2 as
+			select b.name, a.*
+			from contrib a 
+			left join Lookup.Compscanvar_lookup b
+			on upcase(a.Variable) = cats(upcase(b.newcolumn),"_W");
+	quit;
+	Data contrib2;
+	     set contrib2;
+	     New_Var = tranwrd((variable),"_W"," ");
+	     if name = " " then NAME = New_Var;
+	run;
+%Mend;
+%T ();
+
+%Macro T (); 
+	proc delete data=corr_percent; run;
+	%do seg = 1 %to 5 ;
+		proc sql; select Parameter into : modvars separated by ' ' from data&seg..Parameter_estimate where  estimate ne . and upcase(parameter) ne 'INTERCEPT'; quit;
+		%Corr_Monitoring (disb&seg, &modvars ,segcorr&seg, Summary1, 101, -101) ;
+		%let vcount = %sysfunc(countw(&modvars));
+		data corr_percent&seg;
+			set work.segcorr&seg;
+			array vars [&vcount] &modvars;
+			flag = 0;
+			do i = 1 to &vcount;
+			    if vars[i] ne 1 and vars[i] > 0.6 then do;
+			         flag = flag+1;
+			    end;
+			end;
+			corr_percent=1-flag/(&vcount-1);
+		run;
+		data Comp.corr_percent&seg;
+			set work.corr_percent&seg;
+			segment = &seg;
+		run;
+		proc append base=corr_percent data= comp.corr_percent&seg force; run;
+	%end;
+	data corr_percent (keep= _name_ segment corr_percent);
+		set corr_percent;
+	run;
+	proc sql;
+	    create table corr_percent2 as
+			select b.name, a.*
+			from corr_percent a 
+			left join Lookup.Compscanvar_lookup b
+			on upcase(a._name_) = cats(upcase(b.newcolumn),"_W")
+			order by a.segment;
+	quit;
+	
+	Data corr_percent2;
+		set corr_percent2;
+		New_Var = tranwrd((_name_),"_W"," ");
+		if NAME = " " then NAME = New_Var;
+	run;
+	proc sort data = CORR_PERCENT2;
+		by segment;
+	run;
+%Mend;
+%T ();
+
+/***************************************************************************************/
+/****************************** Variables VIF Calculations *****************************/
+/***************************************************************************************/
+
+%macro VIF_Monitoring(Scoreset=,Vars=,NameOutput=,outdataset=) ; 
+	proc delete data= VIFREPORT; run;
+	data in ;
+		set &Scoreset ;
+		y = probit(uniform(1)); 
+		keep &Vars y ;
+	run;
+
+	Proc reg data = in outvif OUTEST = WORK.VIF RIDGE=0 noprint ;
+		model y = &Vars /vif collin;
+	quit;
+
+	data VIF ;
+		set VIF ;
+		format population $100. ;
+		population = "&type";
+		if _type_ = 'RIDGEVIF' ;
+		keep Population &Vars;
+	run;
+	proc transpose data = VIF out = VIF (rename = ( col1 = &NameOutput))  Name = VARIABLE ;
+	run;
+
+	proc append base =  VIFREPORT data = VIF force ;
+	quit;
+	data VIFREPORT ;
+		set VIFREPORT ;
+		label Variable = "VAR";
+	run;
+%mend;
+
+%Macro T (); 
+	proc delete data = VIFALLSEG; run;
+	%do seg = 1 %to 5;
+		proc sql; select Parameter into : modvars separated by ' ' from data&seg..Parameter_estimate where  estimate ne . and upcase(parameter) ne 'INTERCEPT'; quit;
+		%let type = VIF;
+		%VIF_Monitoring(Scoreset=disb&seg,Vars=&modvars,NameOutput=vif,outdataset=vif_seg&seg); 
+		data Comp.vif_seg&seg;
+			set work.VIFREPORT;	
+			segment = &seg;
+		run;
+		proc append base = VIFALLSEG data = Comp.vif_seg&seg force ; run;
+	%end;
+
+	proc sql;
+	    create table VIF2 as
+			select b.name, a.*
+			from VIFALLSEG a 
+			left join Lookup.Compscanvar_lookup b
+			on upcase(a.variable) = cats(upcase(b.newcolumn),"_W");
+	quit;
+	data VIF2;
+		set VIF2;
+		new_var = tranwrd((variable),"_W"," ");
+		if name = " " then name = new_var;
+	run;
+%Mend;
+%T ();
+
+
+/***************************************************************************************/
+/********************************** Confidence Bands ***********************************/
+/***************************************************************************************/
+
+%macro plotconfidencebands_report(inputdata=, segment=);
+	proc delete data=seg_summary&segment; run;
+	proc sql noprint;
+		select cats(parameter,'_W') into : confidvar separated by ' ' 
+		from _estimates_&segment
+		;
+	quit;
+	proc sql noprint;
+		select scorecardvariable into : descriptionvar separated by ' ' 
+		from _estimates_&segment;
+	quit;
+
+	%do u = 1 %to %sysfunc(countw(&confidvar));
+		%let var = %scan(&confidvar, &u);
+		%let dvar = %scan(&descriptionvar,&u);
+		
+		proc sql noprint;
+			create table allout as
+				select &var,count(*)
+				from &inputdata
+				group by &var;
+		quit;
+		%do i = 1 %to %obscnt(allout);
+
+			data onescore;
+				set allout;
+				if _n_ = &i;
+			run;
+
+			proc sql noprint; select cats("&dvar woe : ",&var) into : score  from onescore ; quit;
+
+			proc sql noprint;
+				create table Alloutx as 
+					select * from &inputdata
+					where &var in (select &var from onescore );
+			quit;
+
+		    %let position = %sysfunc( mod(&i, 4) );
+		    %if &position = 1 %then %position_report(0,0);
+		    %else %if &position = 2 %then %position_report(0,4);
+		    %else %if &position = 3 %then %position_report(4.5,0);
+		    %else %if &position = 0 %then %position_report(4.5,4.5);
+
+		    %let width = 4;
+		    %let height = 4;
+		    %if &position = 1 %then %do;
+		          ods pdf startpage = now;
+		          ods layout start;
+		    %end;
+
+		    ods region y=&y.in x=&x.in width=&width.in height=&height.in;
+		    %VarCheckConfidenceBand1_Report(Alloutx, month, V655, target, Principaldebt ,0,0,4,4, &score ) ;
+
+			data summary1;
+                    set summary1;
+                    length variablename $40 bin 8.;
+                    if actual >= lowerbound and actual <= upperbound then flag = 0;
+                    else flag = 1;
+                    bin=&i;
+                    variablename ="&var" ;
+					count = 1;
+            run;
+
+            proc append base= seg_summary&segment data=summary1 force ; run;
+
+			%let obs = %obscnt(allout);
+			%let count = %sysfunc( mod(&obs, 4) );
+
+		    %if &position = 0  %then %do;
+		          ods layout end ;
+		    %end;
+
+			%if (%obscnt(allout)= &i.) %then %do;
+		          ods layout end ;
+		    %end;
+		%end;
+	%end;
+%mend;
+
+
+options mprint mlogic;
+%Macro T (); 
+	proc delete data = confidence; run;
+	%do seg = 1 %to 5;
+		%plotconfidencebands_report(inputdata=disb&seg, segment=&seg);
+		data seg_summary&seg;
+		  set seg_summary&seg;
+		  segment = &seg;
+		run;
+		proc sql;
+		  	create table Comp.SEG&seg._Confidence  as
+		        select distinct(variablename), segment, sum(flag)/sum(count) as No_of_buckets_outside_CB
+				from seg_summary&seg
+		        group by variablename;
+		quit;
+		proc append base = confidence data =comp.seg&seg._confidence;
+	%end;
+	proc sql;
+	    create table confidence2 as
+			select b.name, a.*
+			from confidence a 
+			left join lookup.Compscanvar_lookup b
+			on upcase(a.variablename) = cats(upcase(b.newcolumn),"_W");
+	quit;
+
+	Data confidence2;
+		set confidence2;
+		New_Var = tranwrd((variablename),"_W"," ");
+		if NAME = " " then NAME = New_Var;
+	run;
+%Mend;
+%T ();
+
+proc sql;
+	create table comp.v5_sloperate_&month as
+		select a.*, b.corr_percent as correlation, c.contribution, d.vif, e.No_of_buckets_outside_CB
+		from comp.v5_sloperate_&month a
+		left join CORR_PERCENT2 b
+		on upcase(a.variable_name) = upcase(b.NAME)
+		and a.segment = b.segment
+		left join CONTRIB2 c
+		on  upcase(a.variable_name) = upcase(c.NAME)
+		and a.segment = c.segment
+		left join VIF2 d
+		on  upcase(a.variable_name) = upcase(d.NAME)
+		and a.segment = d.segment
+		left join CONFIDENCE2 e
+		on  upcase(a.variable_name) = upcase(e.NAME)
+		and a.segment = e.segment;
+quit;
+
+
+/***************************************************************************************/
+/********************* Calculate the month Ginis for the variables *********************/
+/***************************************************************************************/
+
+%GiniPerVariable_Monitoring(segment=1,inputdata=disb1,FinalScoreField=CS_V570_prob,period=month,target=target,outputdata=Ginis1 );
+%GiniPerVariable_Monitoring(segment=2,inputdata=disb2,FinalScoreField=CS_V570_prob,period=month,target=target,outputdata=Ginis2 );
+%GiniPerVariable_Monitoring(segment=3,inputdata=disb3,FinalScoreField=CS_V570_prob,period=month,target=target,outputdata=Ginis3 );
+%GiniPerVariable_Monitoring(segment=4,inputdata=disb4,FinalScoreField=CS_V570_prob,period=month,target=target,outputdata=Ginis4 );
+%GiniPerVariable_Monitoring(segment=5,inputdata=disb5,FinalScoreField=CS_V570_prob,period=month,target=target,outputdata=Ginis5 );
+
+%macro appendginis(outdataset=);
+     %do i = 1 %to 5;
+		proc sql;
+			create table _tempgini_ as
+				select b.scorecardvariable as variable_name,&i as segment, a.*
+				from (select * from Ginis&i ) a left join _estimates_&i b
+				on  upcase(a.VarName) = (b.Parameter);
+		quit;
+		proc append base = &outdataset data=_tempgini_; run;
+     %end;
+
+     Data &outdataset;
+	     set &outdataset;
+	     New_Var = tranwrd((varname),"_W"," ");
+	     if variable_name = " " then variable_name = New_Var;
+	run; 
+%mend;
+%appendginis(outdataset=comp.variables_gini_summary_&month.);
+
+
+/***************************************************************************************/
+/*********************** Calculate overall gini for each segments **********************/
+/***************************************************************************************/
+
+%macro calcginimetrics(segment =0,indataset=, period=,target=, listofvargini=);
+     %checkifcolumnsexist(indataset=&indataset,outdataset=missingvariables,columnlist=&period &target &listofvargini);
+     %if %obscnt(missingvariables) = 0 %then %do;
+           data score_table;
+                set &indataset(keep = &target &period &listofvargini);
+           run;
+           proc delete data = _temp_; run;
+           proc delete data = ginipersegment_seg&segment; run;
+
+           %do v = 1 %to %sysfunc(countw(&listofvargini));
+                %let scorevar = %scan(&listofvargini,&v.);
+                proc delete data = &scorevar.; run;
+                proc delete data = _temp1_; run;
+                %CreateMonthlyGini(Dset =score_table , TargetVar = &target  , Score = &scorevar ,   Measurement = &period, outdataset =&scorevar.  ) ;
+                data _temp1_(keep = segment &period Score_type gini);
+                     set &scorevar.;
+                     length Score_type $32.;
+                     Score_type ="&scorevar.";
+                     segment = &segment;
+                run;
+                proc append base = ginipersegment_seg&segment data = _temp1_ force;
+                RUN;            
+           %end;
+
+           proc delete data = overallgini_seg&segment;
+           RUN;
+           %do v = 1 %to %sysfunc(countw(&listofvargini));
+                %let scorevar = %scan(&listofvargini,&v.); 
+                proc delete data = _temp_; run;
+                proc delete data = &scorevar; run;
+                %Calc_Gini (Predicted_col=&scorevar, Results_table = score_table , Target_Variable = &target , Gini_output = &scorevar );
+                data _temp_(keep = segment score_type gini);
+                     set &scorevar;
+                     length Score_type $32.;
+                     Score_type ="&scorevar.";
+                     segment = &segment;
+                run;
+                proc append base = overallgini_seg&segment data =_temp_ force; 
+                run;
+           %end;
+           Proc sort data=ginipersegment_seg&segment;
+                by Month;
+           run;
+           proc transpose data=ginipersegment_seg&segment out=Gini_trans(drop=_name_);
+                by Month;
+                id score_type;
+                var gini;
+           run;;
+           data ginipersegment_seg&segment;
+                set Gini_trans;
+                segment = &segment;
+           run;
+           proc append base =comp.ginipersegment_summary_&month data = ginipersegment_seg&segment force; run;
+           proc append base = comp.overallgini_summary_&month data = overallgini_seg&segment force; run;
+     %end;
+     %else %do;
+           %put One column supplied does not exist ;
+     %end;      
+%mend;
+
+Data Disbursedbase5;
+	set Disbursedbase_&month;
+	Compuscan_Generic = prismscoremi;
+	Tu_Generic = Tu_Score;
+	Compuscan_Prob = CS_V570_Prob;
+	where maxSCORECARDVERSION <> 'V4';
+run;
+
+data segment_1_gini segment_2_gini segment_3_gini segment_4_gini segment_5_gini;
+     set Disbursedbase5;
+     if seg=1 then output segment_1_gini ;
+     else if seg=2 then output segment_2_gini ;
+     else if seg=3 then output segment_3_gini ;
+     else if seg=4 then output segment_4_gini ;
+     else if seg=5 then output segment_5_gini ;
+run;
+
+proc delete data = comp.ginipersegment_summary_&month; run;
+proc delete data = comp.overallgini_summary_&month; run;
+
+%CalcGinimetrics(segment =1,indataset=segment_1_gini, period=month,target=target, listofvargini=Compuscan_Prob  CS_V560_Prob Compuscan_Generic Tu_Generic TU_V580_Prob TU_V570_Prob V622 V635 V636 V645 V645_adj V655 );
+%CalcGinimetrics(segment =2,indataset=segment_2_gini, period=month,target=target, listofvargini=Compuscan_Prob  CS_V560_Prob Compuscan_Generic Tu_Generic TU_V580_Prob TU_V570_Prob V622 V635 V636 V645 V645_adj V655 );
+%CalcGinimetrics(segment =3,indataset=segment_3_gini, period=month,target=target, listofvargini=Compuscan_Prob  CS_V560_Prob Compuscan_Generic Tu_Generic TU_V580_Prob TU_V570_Prob V622 V635 V636 V645 V645_adj V655 );
+%CalcGinimetrics(segment =4,indataset=segment_4_gini, period=month,target=target, listofvargini=Compuscan_Prob  CS_V560_Prob Compuscan_Generic Tu_Generic TU_V580_Prob TU_V570_Prob V622 V635 V636 V645 V645_adj V655 );
+%CalcGinimetrics(segment =5,indataset=segment_5_gini, period=month,target=target, listofvargini=Compuscan_Prob  CS_V560_Prob Compuscan_Generic Tu_Generic TU_V580_Prob TU_V570_Prob V622 V635 V636 V645 V645_adj V655 );
+%CalcGinimetrics(segment =0,indataset=Disbursedbase5, period=month,target=target, listofvargini=Compuscan_Prob  CS_V560_Prob Compuscan_Generic Tu_Generic TU_V580_Prob TU_V570_Prob V622 V635 V636 V645 V645_adj V655 );
+
+data Comp.Ginipersegment_summary_&month;
+     set  GINIPERSEGMENT_SEG1 GINIPERSEGMENT_SEG2 GINIPERSEGMENT_SEG3 GINIPERSEGMENT_SEG4
+          GINIPERSEGMENT_SEG5 GINIPERSEGMENT_SEG0;
+     rename Compuscan_Prob=V570_Comp_Prob CS_V560_Prob=V560_Comp_Prob Compuscan_Generic=Comp_Generic_Score Tu_Generic=TU_Generic_Score 
+      	 TU_V580_Prob=V580_TU_Prob TU_V570_Prob=V570_TU_Prob  V6_Prob3=V622_Prob V635=V635_Prob V636=V636_Prob V655=V655_Prob month=First_Due_Month;
+run;
+
+
+/***************************************************************************************/
+/**************************** Calibrations on V560 and V570 ****************************/
+/***************************************************************************************/
+
+/*** Start of calibration - Creation of a and c for segment split ***/
+%macro Loopthroughcal(Dset,seg=,name=,prob=, Segmentation=, weight=);
+      proc nlmixed data=&Dset (where = (&Segmentation = &seg))  ; 
+            parms a=1 c=0;
+            x=1/(1+((&prob/(1-&prob))**(-a))*exp(c) );
+            MODEL Target ~ BINARY(x);
+            _ll = _ll*&weight; 
+            ODS OUTPUT ParameterEstimates= parameters (keep = Parameter Estimate);
+      run;
+      proc transpose data =  parameters out = parameters ;
+            var Estimate ;
+            id Parameter ;
+      run;
+      data parameters (drop = _NAME_ ) ;
+            set parameters ; 
+            Model = "&Name";
+            &Name = &seg ;
+      run;
+      proc append base  = Parameters_&name data = parameters force ;
+      quit;
+%mend; 
+
+/*** Check which banks are in the data - use for bank calibration ***/
+proc freq data=disbursedbase_&month;
+	tables institutioncode;
+run;
+
+%macro calibration(Input=,Output=);
+    proc sql;
+        create table subset as
+            select *, ((Principaldebt/sum(Principaldebt))*count(tranappnumber)) as weight
+            from &Input;
+    quit;     
+
+	/*** Segment Calibration ***/
+	%Loopthroughcal(Dset=subset, seg=1, name=V571_seg, prob=CS_V570_Prob, Segmentation=seg, weight=weight);
+    %Loopthroughcal(Dset=subset, seg=2, name=V571_Seg, prob=CS_V570_Prob, Segmentation=seg, weight=weight);
+    %Loopthroughcal(Dset=subset, seg=3, name=V571_Seg, prob=CS_V570_Prob, Segmentation=seg, weight=weight);
+    %Loopthroughcal(Dset=subset, seg=4, name=V571_Seg, prob=CS_V570_Prob, Segmentation=seg, weight=weight);
+    %Loopthroughcal(Dset=subset, seg=5, name=V571_Seg, prob=CS_V570_Prob, Segmentation=seg, weight=weight);     
+
+	%Loopthroughcal(Dset=subset, seg=1, name=V581_seg, prob=TU_V580_Prob, Segmentation=Tu_seg, weight=weight);
+    %Loopthroughcal(Dset=subset, seg=2, name=V581_Seg, prob=TU_V580_Prob, Segmentation=Tu_seg, weight=weight);
+    %Loopthroughcal(Dset=subset, seg=3, name=V581_Seg, prob=TU_V580_Prob, Segmentation=Tu_seg, weight=weight);
+    %Loopthroughcal(Dset=subset, seg=4, name=V581_Seg, prob=TU_V580_Prob, Segmentation=Tu_seg, weight=weight);
+    %Loopthroughcal(Dset=subset, seg=5, name=V581_Seg, prob=TU_V580_Prob, Segmentation=Tu_seg, weight=weight);     
+
+	/*** Apply calibration ***/
+	proc sql;
+          create table Segment_calib
+	          as select a.*,
+	          1/(1+(CS_V570_Prob/(1-CS_V570_Prob))**(-1*(b.a))*exp(b.c)) as V571,
+	          1/(1+(TU_V580_Prob/(1-TU_V580_Prob))**(-1*(c.a))*exp(c.c)) as V581
+	          from subset a
+	          left join parameters_V571_seg b
+	          on a.seg = b.V571_Seg
+	          left join parameters_V581_seg c
+	          on a.seg = c.V581_Seg;
+    quit;     	
+
+	/*** Bank Calibration ***/
+	proc sort data=Segment_calib nodupkey out=predata;
+        by tranappnumber;
+    run;     
+
+	/*** Rename new institutioncodes or empty cases ***/
+	data predata;
+          set predata;
+          if compress(INSTITUTIONCODE) not in ('BNKABL', 'BNKABS', 'BNKCAP', 'BNKFNB', 'BNKNED', 'BNKSTD', 'BNKOTH') then INSTITUTIONCODE ='BNKOTH';
+    run;     
+
+	%Loopthroughcal(Dset=predata, seg='BNKABL', prob=V571, name=V572_INSTITUTIONCODE, Segmentation=INSTITUTIONCODE, weight=weight);
+    %Loopthroughcal(Dset=predata, seg='BNKABS', prob=V571, name=V572_INSTITUTIONCODE, Segmentation=INSTITUTIONCODE, weight=weight);
+    %Loopthroughcal(Dset=predata, seg='BNKCAP', prob=V571, name=V572_INSTITUTIONCODE, Segmentation=INSTITUTIONCODE, weight=weight);
+    %Loopthroughcal(Dset=predata, seg='BNKFNB', prob=V571, name=V572_INSTITUTIONCODE, Segmentation=INSTITUTIONCODE, weight=weight);
+    %Loopthroughcal(Dset=predata, seg='BNKNED', prob=V571, name=V572_INSTITUTIONCODE, Segmentation=INSTITUTIONCODE, weight=weight);
+    %Loopthroughcal(Dset=predata, seg='BNKSTD', prob=V571, name=V572_INSTITUTIONCODE, Segmentation=INSTITUTIONCODE, weight=weight);
+    %Loopthroughcal(Dset=predata, seg='BNKOTH', prob=V571, name=V572_INSTITUTIONCODE, Segmentation=INSTITUTIONCODE, weight=weight);     
+/*	%Loopthroughcal(Dset=predata, seg='BNKINV', prob=V571, name=V572_INSTITUTIONCODE, Segmentation=INSTITUTIONCODE, weight=weight);*/
+
+	%Loopthroughcal(Dset=predata, seg='BNKABL', prob=V581, name=V582_INSTITUTIONCODE, Segmentation=INSTITUTIONCODE, weight=weight);
+    %Loopthroughcal(Dset=predata, seg='BNKABS', prob=V581, name=V582_INSTITUTIONCODE, Segmentation=INSTITUTIONCODE, weight=weight);
+    %Loopthroughcal(Dset=predata, seg='BNKCAP', prob=V581, name=V582_INSTITUTIONCODE, Segmentation=INSTITUTIONCODE, weight=weight);
+    %Loopthroughcal(Dset=predata, seg='BNKFNB', prob=V581, name=V582_INSTITUTIONCODE, Segmentation=INSTITUTIONCODE, weight=weight);
+    %Loopthroughcal(Dset=predata, seg='BNKNED', prob=V581, name=V582_INSTITUTIONCODE, Segmentation=INSTITUTIONCODE, weight=weight);
+    %Loopthroughcal(Dset=predata, seg='BNKSTD', prob=V581, name=V582_INSTITUTIONCODE, Segmentation=INSTITUTIONCODE, weight=weight);
+    %Loopthroughcal(Dset=predata, seg='BNKOTH', prob=V581, name=V582_INSTITUTIONCODE, Segmentation=INSTITUTIONCODE, weight=weight);     
+/*    %Loopthroughcal(Dset=predata, seg='BNKINV', prob=V581, name=V582_INSTITUTIONCODE, Segmentation=INSTITUTIONCODE, weight=weight);     */
+
+	/*** Apply calibration ***/
+	proc sql;
+          create table Bank_Calibration
+          as select a.*,
+          1/(1+(V571/(1-V571))**(-1*(b.a))*exp(b.c)) as V572,
+          1/(1+(V581/(1-V581))**(-1*(c.a))*exp(c.c)) as V582
+          from predata a
+          left join PARAMETERS_V572_INSTITUTIONCODE b
+          on a.Institutioncode = b.V572_Institutioncode
+          left join PARAMETERS_V582_INSTITUTIONCODE c
+          on a.Institutioncode = c.V582_Institutioncode;
+    quit;     
+
+	proc sort data=Bank_Calibration nodupkey out=&Output;
+        by tranappnumber;
+    run;
+%mend;
+
+%calibration(Input=Disbursedbase_&month, Output=comp.Calibrated_data);
+
+
+
+/**********************************************************************/
+/***************** Ginis for Calibration Data on V570 *****************/
+/**********************************************************************/
+
+/****************************** Overall *******************************/
+%Calc_Gini (V572, comp.Calibrated_data, target, GiniTable_V572);
+%Calc_Gini (V582, comp.Calibrated_data, target, GiniTable_V582);
+
+data GiniTable_V572 (keep= Gini Score_type segment);
+	set GiniTable_V572;
+	segment = 0;
+	Score_type = "V572 Comp Prob";
+run;
+
+data GiniTable_V582 (keep= Gini Score_type segment);
+	set GiniTable_V582;
+	segment = 0;
+	Score_type = "V582 TU Prob";
+run;
+
+
+/**************************** Per Segment *****************************/
+%macro Create_gini_tables(Predicted_col, Modelname, Dset, numberofsegment, Target_Variable, Gini_output);
+	%do seg = 1 %to &numberofsegment;
+		data &Dset._seg&seg;
+			set &Dset;
+			if seg = &seg;
+		run;
+
+		%Calc_Gini(&Predicted_col, &Dset._seg&seg, &Target_Variable, &Gini_output._seg&seg);
+
+		data &Gini_output._seg&seg (keep= Gini Score_type segment);
+			set &Gini_output._seg&seg;
+			segment = &seg;
+			Score_type = "&Predicted_col. &Modelname Prob";
+		run;
+
+		proc append base=&Gini_output data=&Gini_output._seg&seg force; run;
+	%end;
+%mend;
+
+%Create_gini_tables(V572, Comp, comp.Calibrated_data, 5, target, GiniTable_V572)
+%Create_gini_tables(V582, TU, comp.Calibrated_data, 5, target, GiniTable_V582)
+
+
+/************************** Ginis over time ***************************/
+%macro Create_ginipermonth(numberofsegment, indataset, period, target, vari);
+	%do seg = 0 %to &numberofsegment;
+
+	    %if &seg = 0 %then %do;
+			data score_table;
+				set &indataset;
+			run;
+	    %end;
+
+		%else %do;
+			data score_table;
+				set &indataset;
+				if seg = &seg;
+			run;
+		%end;
+
+		data score_table ;
+			set score_table (keep = &target &period &vari);
+		run;
+
+		proc delete data = calib_giniperseg_seg&seg; run;
+		proc delete data = &vari.; run;
+		proc delete data = _temp1_; run;
+
+		%CreateMonthlyGini(Dset=score_table, TargetVar=&target, Score=&vari, Measurement=&period, outdataset=&vari.) ;
+
+		data _temp1_(keep = segment &period Score_type gini);
+		     set &vari;
+		     length Score_type $32.;
+		     Score_type ="&vari.";
+		     Segment = &seg;
+		run;
+
+		proc append base=calib_giniperseg_seg&seg data=_temp1_ force;
+		run; 
+
+		Proc sort data=calib_giniperseg_seg&seg;
+		    by &period;
+		run;
+
+		proc transpose data=calib_giniperseg_seg&seg out=Gini_trans(drop=_name_);
+		    by Month;
+		    id Score_type;
+		    var gini;
+		run;
+
+		data calib_giniperseg_seg&seg;
+		    set Gini_trans;
+		    segment = &seg;
+		run;
+
+		proc append base=giniperseg_sum_&vari data=calib_giniperseg_seg&seg force; run;
+
+	%end;
+%mend;
+
+%Create_ginipermonth(numberofsegment=5, indataset=comp.Calibrated_data, period=month, target=target, vari=V572);
+%Create_ginipermonth(numberofsegment=5, indataset=comp.Calibrated_data, period=month, target=target, vari=V582);
+
+/**********************************************************************/
+
+/*** Create ginipersegment_summary table ***/
+proc sql;
+	create table comp.ginipersegment_summary_&month as
+		select a.First_Due_Month, a.V570_Comp_Prob, a.V560_Comp_Prob, a.Comp_Generic_Score, a.TU_Generic_Score, 
+				a.V570_TU_Prob,a.V580_TU_Prob, a.V622 as V622_Prob, a.V635_Prob, a.V636_Prob, b.V572 as V572_Comp_Prob, c.V582 as V582_TU_Prob, a.segment,V645 as V645_prob, V645_adj
+		from Comp.Ginipersegment_summary_&month a left join giniperseg_sum_V572 b
+		on a.First_Due_Month = b.month and a.segment = b.segment
+		left join giniperseg_sum_V582 c
+		on b.month = c.month and b.segment = c.segment;
+quit;
+
+/*** Create currentmodel_benchmark table ***/
+data Comp.overallgini_summary_&month;
+	set Comp.overallgini_summary_&month GiniTable_V572 GiniTable_V582 comp.GiniTable_Build;
+run;
+
+proc sql;
+	create table Comp.currentmodel_benchmark_&month as
+		select distinct  a.*,b.gini as Current_gini, (b.gini-a.gini)/a.gini as Relative_lift
+		from Comp.overallgini_summary_&month a,
+			(select segment, gini from Comp.overallgini_summary_&month
+			where score_type='Compuscan_Prob') b
+		where a.segment=b.segment;
+quit;
+
+data Comp.currentmodel_benchmark_&month;
+	set Comp.currentmodel_benchmark_&month;
+    format Recommended_Action $500.;
+   
+	if Relative_lift >=-0.10 then do;
+	   	Recommended_Action = cats("No Action ");
+	end;
+	else if Relative_lift <-0.10 and Relative_lift >-0.15 then do;
+		Recommended_Action =cats("Check Additional Metrics and Establish if a score to Risk Calibration is required");
+	end;
+	else if Relative_lift <-0.15 then do;
+	   Recommended_Action =cats("Check Additional Metrics and Establish if a score to Risk Calibration is required");
+	end;
+run;
+
+data Comp.currentmodel_benchmark_&month.;
+     set Comp.currentmodel_benchmark_&month.;
+     if score_type='Compuscan_Generic' then score_type ='Comp Generic Score';
+     else if score_type='Tu_Generic' then score_type ='TU Generic Score';
+     else if score_type='Compuscan_Prob' then score_type ='V570 Comp Prob';
+	 else if score_type='TU_V580_Prob' then score_type ='V580 TU Prob';
+	 else if score_type='V622' then score_type ='V622 Prob';
+	 else if score_type='V635' then score_type ='V635 Prob';
+	 else if score_type='V636' then score_type ='V636 Prob';
+	 else if score_type='V645' then score_type ='V645 Prob';
+	 else if score_type='V645_adj' then score_type ='V645_adj Prob';
+run;
+
+/**********************************************************************/
+/************* Save datasets on cred_scoring for Power BI *************/
+/**********************************************************************/
+
+/*** Only run this part if you have write access to cred_scoring ***/
+libname cred_scr odbc dsn=Dev_DDGe schema='dbo' preserve_tab_names=yes connection=unique direct_sql=yes;
+proc delete data =cred_scr.v5_Gini_relative_xml; run;
+proc sql;
+     create table  cred_scr.v5_Gini_relative_xml(BULKLOAD=YES) as
+           select  distinct * 
+           from Comp.currentmodel_benchmark_&month.;
+quit;
+libname cred_scr odbc dsn=Dev_DDGe schema='dbo' preserve_tab_names=yes connection=unique direct_sql=yes;
+proc delete data =cred_scr.Gini_summary_xml; run;
+proc sql;
+     create table  cred_scr.Gini_summary_xml(BULKLOAD=YES) as
+           select  distinct * 
+           from Comp.ginipersegment_summary_&month;
+quit;
+
+libname cred_scr odbc dsn=Dev_DDGe schema='dbo' preserve_tab_names=yes connection=unique direct_sql=yes;
+proc delete data =cred_scr.v5_Segment_distribution_xml; run;
+proc sql;
+     create table  cred_scr.v5_Segment_distribution_xml(BULKLOAD=YES) as
+           select  distinct * 
+           from Comp.Summarytable_&month;
+quit;
+
+Data Variables_Distribution_&month.;
+	set Comp.Variables_Distribution_&month.;
+	label month = App_month;
+run;
+
+libname cred_scr odbc dsn=Dev_DDGe schema='dbo' preserve_tab_names=yes connection=unique direct_sql=yes;
+proc delete data =cred_scr.distribution_summary_xml; run;
+proc sql;
+     create table  cred_scr.distribution_summary_xml(BULKLOAD=YES) as
+           select  distinct * 
+           from Variables_Distribution_&month.;
+quit;
+
+
+libname cred_scr odbc dsn=Dev_DDGe schema='dbo' preserve_tab_names=yes connection=unique direct_sql=yes;
+proc delete data =cred_scr.V5_Variables_stability_xml; run;
+proc sql;
+     create table  cred_scr.V5_Variables_stability_xml(BULKLOAD=YES) as
+           select  distinct * 
+           from Comp.variables_stability_&month.;
+quit;
+
+
+libname cred_scr odbc dsn=Dev_DDGe schema='dbo' preserve_tab_names=yes connection=unique direct_sql=yes;
+proc delete data =cred_scr.v5_sloperate_xml; run;
+proc sql;
+     create table  cred_scr.v5_sloperate_xml(BULKLOAD=YES) as
+           select  distinct * 
+           from Comp.V5_sloperate_&month.;
+quit;
+
+libname cred_scr odbc dsn=Dev_DDGe schema='dbo' preserve_tab_names=yes connection=unique direct_sql=yes;
+proc delete data =cred_scr.CSI_Distribution_xml; run;
+proc sql;
+     create table  cred_scr.CSI_Distribution_xml(BULKLOAD=YES) as
+           select  distinct * 
+           from Comp.CSI_Distribution_&month.;
+quit;
+
+libname cred_scr odbc dsn=Dev_DDGe schema='dbo' preserve_tab_names=yes connection=unique direct_sql=yes;
+proc delete data =cred_scr.v5_Segment_distribution_reblt; run;
+proc sql;
+                create table  cred_scr.v5_Segment_distribution_reblt(BULKLOAD=YES) as
+                                select  distinct * 
+                                from Comp.Summarytable_&month;
+quit;
+
+
+/*** Save Ginis for Model Gini Comparison table on dashbaord ***/
+data Rebuild_Refit_Ginis (keep=gini score_type segment);
+	set Comp.Challenger_Models_&month;
+	if month = "&month." and (applied_model = "Rebuild_Comp_&prevprevmonth." or applied_model = "Refit_Comp_&prevprevmonth.");
+run;
+
+data Comp.overallgini_summary_&month;
+    set Comp.overallgini_summary_&month Rebuild_Refit_Ginis;
+run;
+
+proc sql;
+    create table comp.currentmodel_benchmark_&month as
+        select distinct  a.*,b.gini as Current_gini, (b.gini-a.gini)/a.gini as Relative_lift
+        from comp.overallgini_summary_&month a,
+            (select segment, gini from comp.overallgini_summary_&month
+            where score_type='Compuscan_Prob') b
+        where a.segment=b.segment;
+quit;
+
+data Comp.currentmodel_benchmark_&month;
+    set Comp.currentmodel_benchmark_&month;
+    format Recommended_Action $500.;
+   
+    if Relative_lift >=-0.10 then do;
+           Recommended_Action = cats("No Action ");
+    end;
+    else if Relative_lift <-0.10 and Relative_lift >-0.15 then do;
+        Recommended_Action =cats("Check Additional Metrics and Establish if a score to Risk Calibration is required");
+    end;
+    else if Relative_lift <-0.15 then do;
+       Recommended_Action =cats("Check Additional Metrics and Establish if a score to Risk Calibration is required");
+    end;
+run;
+
+data Comp.currentmodel_benchmark_&month.;
+     set Comp.currentmodel_benchmark_&month.;
+     if score_type='Compuscan_Generic' then score_type ='Comp Generic Score';
+     else if score_type='Tu_Generic' then score_type ='TU Generic Score';
+     else if score_type='Compuscan_Prob' then score_type ='V570 Comp Prob';
+     else if score_type='Tu_V570_prob' then score_type ='V570 TU Prob';
+     else if score_type='V6_Prob3' then score_type ='V622 Prob';
+     else if score_type='V635' then score_type ='V635 Prob';
+     else if score_type='V636' then score_type ='V636 Prob';
+     else if score_type='Rebuild_Compuscan' then score_type ='Rebuild Compuscan';
+     else if score_type='Refit_Compuscan' then score_type ='Refit Compuscan';
+	 else if score_type='V645' then score_type ='V645 Prob';
+     else if score_type='tu_V580_prob' then score_type ='V580 TU Prob';
+     else if score_type='Compuscan_Prob' then score_type ='V570 Comp Prob';
+run;
+
+/*** Upload data to cred_scoring ***/
+libname cred_scr odbc dsn=Dev_DDGe schema='dbo' preserve_tab_names=yes connection=unique direct_sql=yes;
+
+proc delete data =cred_scr.Challenger_Models_xml; run;
+proc sql;
+	create table cred_scr.Challenger_Models_xml(BULKLOAD=YES) as
+		select distinct *
+		from comp.challenger_models_&month.;
+quit;
+
+
+libname cred_scr odbc dsn=Dev_DDGe schema='dbo' preserve_tab_names=yes connection=unique direct_sql=yes;
+
+proc delete data =cred_scr.v5_Gini_relative_xml; run;
+proc sql;
+	create table cred_scr.v5_Gini_relative_xml(BULKLOAD=YES) as
+		select distinct *
+		from Comp.currentmodel_benchmark_&month.;
+quit;
+
+/*** Refresh Power BI ***/
+
+
+/**********************************************************************/
+/************************** Creating reports **************************/
+/**********************************************************************/
+options dlcreatedir;
+libname reports "\\mpwsas64\Core_Credit_Risk_Models\V5\V5 Monitoring\Performance Monitoring\Compuscan Monitoring\Reports\v570\&month.";
+%let reports = \\mpwsas64\Core_Credit_Risk_Models\V5\V5 Monitoring\Performance Monitoring\Compuscan Monitoring\Reports\v570\&month.;
+
+/*** Create V5 Comp monitoring for segments reports ***/
+%macro buildreport(seg);
+     options nodate nonumber;
+     Title ; 
+     TITLE1; TITLE2;
+     Footnote;
+     Footnote1;
+     Footnote2;
+     options orientation=landscape;
+     ods pdf body = "&reports\V5 Comp monitoring for segment &seg. &month..pdf" ;
+	%macro plotpsi(var=,title1=,dset=,xlbl=);
+		Title "&title1";
+		proc sgplot data=&dset ;
+			where upcase(VariableName) in ("&var")  ;
+			vbar month / response = percent stat = mean group = scores  NOSTATLABEL  BARWIDTH = 0.8 ;  
+			vline month / response = psi y2axis stat = mean group = scores ;
+			vline month / response = marginal_stable y2axis stat = mean group = scores ;
+			vline month / response = Unstable y2axis stat = mean group = scores ;
+			yaxis label = 'Percentage'; 
+			xaxis label = "&xlbl";
+			y2axis label = 'PSI' min = 0 max = 1 ;
+			
+		run;
+		Title;
+	%mend;
+
+	proc sql;
+		create table _estimates_ as
+			select tranwrd(a.parameter,"_W"," ") as parameter,  b.NAME as scorecardvariable
+			from data&seg.._estimates_ a left outer join Lookup.Compscanvar_lookup b
+			on  upcase(a.Parameter) = cats(upcase(b.newcolumn),"_W");
+    quit;
+
+	Data _estimates_;
+		set _estimates_;
+		if parameter = "Intercept" then delete;
+		if scorecardvariable = " " then scorecardvariable = parameter;
+	run;
+
+     data _null_ ;
+         set _estimates_  ;
+         rownum= _n_;
+         call symput (compress("X"||rownum),upcase(Parameter));
+         call symput (compress("Y"||rownum),upcase(scorecardvariable));
+         call symput ('NumVars',compress(rownum));
+     run;
+     %do i = 1 %to &NumVars;
+           %let var = &&X&i..;
+           ods pdf startpage = now;
+           ods layout start;
+           ods region x = 1in y = 0in;
+           ods text = "Performance Monitoring Segment&seg.: &&Y&i.." ;
+
+           ods region y=0.5in x=0in width=4.5in height=4in;
+
+           ods graphics / reset attrpriority=color;
+           Title "Gini over Time";
+           footnote "&&Y&i..";
+           proc sort data=Ginis&seg;
+                 by Month;
+           run;
+           data ginitabletemp;;
+                 set Ginis&seg;
+                 where upcase(VarName) in ("OVERALLSEGMENT","&var"); 
+                 varname = tranwrd(varname,upcase("&var"),upcase("&&Y&i.."));
+           run;
+           proc sgplot data= ginitabletemp;
+                 series x=Month y=Gini / group= Varname  lineattrs= (pattern=solid Thickness = 2  ) ;
+                 yaxis min = 0  grid offsetmin=.05 offsetmax=.05;
+                 xaxis  grid  ;
+                 keylegend / Title = '' ;
+           run;
+           Title;
+           footnote ;
+
+           ods region y=0.5in x=5in width=4.5in height=4in;
+
+           Title "Bad Rate Slope";
+           footnote "Latest FirstDueMonth with full outcome"; 
+           proc sgplot data= Variables_trendreport_seg&seg;
+                 where  upcase(VarName) in ("&var._S") and  segment = &seg ;
+                 vbar Bin / response = volume stat = percent  NOSTATLABEL    FILLATTRS=(color = VLIGB ) ;
+                 vline Bin / response=badrate y2axis stat = mean NOSTATLABEL lineattrs= (pattern=solid Thickness = 2 color = gray)   ;
+                 y2axis min = 0  grid;
+                 yaxis min = 0  grid ;
+				 xaxis label ='Scores';
+			  	keylegend / Title = '' ;
+           run;
+           Title;
+           footnote ;
+
+           ods region y=4.5in x=0in width=4.5in height=4in;
+
+           %plotpsi(var=&var,title1=Application Distribution,dset=summarytable_&seg) ;
+
+           Data Variables_trendreport_seg&seg;
+              set Variables_trendreport_seg&seg;
+              if compress(month) = '.' then delete;
+           run;
+
+           ods region y=4.5in x=5in width=4.5in height=4in;
+
+           ods graphics / reset attrpriority=color;
+           Title "Trends Over Time";
+           proc sort data=Variables_trendreport_seg&seg;
+                 by Month;
+           run;
+           proc sgplot data= Variables_trendreport_seg&seg;
+                 where upcase(VarName) in ("&var._S") and segment = &seg ; 
+                 series x=Month y=BadRate / group= BIN  lineattrs= (pattern=solid Thickness = 2  );
+                 xaxis grid ;
+                 yaxis min = 0  grid offsetmin=.05 offsetmax=.05;
+				 keylegend / Title = '' ;
+           run;
+           Title;
+           ods LAYOUT END ;
+     %end;
+     ods pdf close;
+%mend;
+
+%buildreport(1);
+%buildreport(2);
+%buildreport(3);
+%buildreport(4);
+%buildreport(5);
+
+
+/*** Macros for plotting Confidence bands for all the segments and Institution Codes ***/
+%macro VarCheckConfidenceBand1(Dset, Var, PredProb , Outcome , LSize ,y,x,width,height, Heading ) ;
+	data final ;
+		set &Dset ;
+		RRisk = &Outcome * &LSize ;
+		LoanSize = &LSize;
+		LSizeDSquared =  &LSize *  &LSize ;
+		PredProb = input(&PredProb,20.);
+		RPredProb = PredProb * Loansize ;
+		format bucket $500. ;
+		bucket = compress(&var) ;
+	run;
+
+	proc summary data = final nway missing ;
+		class bucket ;
+		var RRisk RPredProb LoanSize LSizeDSquared ;
+		output out = Summary (drop = _type_) sum() =  ;
+	run;
+
+	data Summary1  ( keep = bucket Predicted LowerBound  UpperBound Actual ) ;
+		retain bucket Predicted Actual;
+		set Summary ;
+		Predicted = RPredProb / Loansize ;
+		Actual =   RRisk/ Loansize ;
+		SE = SQRT(((Predicted)*(1-Predicted)*LSizeDSquared)/(Loansize*Loansize));
+		factor = 3 ;
+		UpperBound = Predicted + factor*SE ;
+		LowerBound = Predicted - factor*SE ;
+		if LowerBound <= 0 then LowerBound = 0 ;
+		if UpperBound >= 1 then UpperBound = 1 ;
+	run;
+
+	data Summary1 ;
+		set Summary1 ;
+		Max = max(Predicted ,LowerBound,  UpperBound, Actual) ;
+		if Max > 1 then Max = 1 ;
+	run;
+
+	Data Summary1;
+		set Summary1;
+		rename Predicted = Expected;
+	run;
+
+	proc sql noprint ;
+		select sum(round(max(max),0.1),0.1) into : UpperRange separated by ''
+		from summary1 ;
+	quit;
+
+	goptions reset = all ;
+	pattern1 v=s c=white;
+	pattern2 v=s c=grayee;
+	pattern3 v=s c=graybb;
+	pattern4 v=s c=graybb;
+	pattern5 v=s c=grayee;
+
+	symbol1 value=none interpol=join color=pink;
+	symbol2 value=none interpol=join color=red width=2;
+
+	axis1 label=("&var")
+	offset=(0,0);                                                                                                                  
+	axis2 label=(angle=90 'Rand Weighted Risk') order = 0 to &UpperRange by 0.1 
+	offset=(0,0);
+
+	symbol3 height=1.5 value=dot;
+
+	/* Define legend characteristics */
+	legend1 order=('Expected') label=none frame;
+	legend2 order=('Actual') label=none frame;
+	Title "&Heading";
+	proc gplot data=Summary1;   
+		plot
+			LowerBound*bucket=1
+			LowerBound*bucket=1
+			Expected*bucket=1
+			UpperBound*bucket=1
+			UpperBound*bucket=1
+			Expected*bucket=2
+			/ overlay areas=5 vaxis = axis2 haxis = axis1 legend = legend1 ;
+		plot2 Actual*bucket / vaxis = axis2 haxis = axis1  legend = legend2;  
+	run;
+	quit;
+	Title ;
+%mend;
+
+%macro position(y1,x1);
+     %global x y;
+     %let x = &x1;
+     %let y = &y1;
+%mend ;
+
+/*** Macro for Confidence Bands plot per variables ***/ 
+%macro plotconfidencebands(inputdata=, segment=);
+     proc sql noprint;
+           select cats(parameter,'_W') into : confidvar separated by ' ' 
+           from _estimates_&segment;
+     quit;
+     proc sql noprint;
+           select parameter into : descriptionvar separated by ' ' 
+           from _estimates_&segment;
+     quit;
+     %do u = 1 %to %sysfunc(countw(&confidvar));
+           %let var = %scan(&confidvar, &u);
+           %let dvar = %scan(&descriptionvar,&u);
+           
+           proc sql noprint;
+                create table allout as
+                     select &var,count(*)
+                     from &inputdata
+                     group by &var;
+           quit;
+           %do i = 1 %to %obscnt(allout);
+                data onescore;
+					set allout;
+					if _n_ = &i;
+                run;
+                proc sql noprint; select cats("&dvar woe : ",&var) into : score  from onescore ; quit;
+                proc sql noprint;
+                    create table Alloutx as 
+						select * from &inputdata
+						where &var in (select &var from onescore );
+                quit;
+
+               %let position = %sysfunc( mod(&i, 4) );
+               %if &position = 1 %then %position(0,0);
+               %else %if &position = 2 %then %position(0,4);
+               %else %if &position = 3 %then %position(4.5,0);
+               %else %if &position = 0 %then %position(4.5,4.5);
+
+               %let width = 4;
+               %let height = 4;
+               %if &position = 1 %then %do;
+                     ods pdf startpage = now;
+                     ods layout start;
+               %end;
+
+               ods region y=&y.in x=&x.in width=&width.in height=&height.in;
+               %VarCheckConfidenceBand1(Alloutx, month, V645, target, Principaldebt, 0, 0, 4, 4, &score);
+
+                %let obs = %obscnt(allout);
+                %let count = %sysfunc( mod(&obs, 4) );
+
+               %if &position = 0  %then %do;
+                     ods layout end ;
+               %end;
+
+                %if (%obscnt(allout)= &i.) %then %do;
+                     ods layout end ;
+               %end;
+           %end;
+     %end;
+%mend;
+
+
+/*** Macro for creating V5 monitoring Full Pack report ***/
+%macro buildreport(seg);
+     %macro plotpsi(var=,title1=,dset=,xlbl=);
+           Title "&title1";
+           proc sgplot data=&dset ;
+                where upcase(VariableName) in ("&var")  ;
+                  vbar month / response = percent stat = mean group = scores  NOSTATLABEL  BARWIDTH = 0.8 ;  
+                   vline month / response = psi y2axis stat = mean group = scores ;
+                   vline month / response = marginal_stable y2axis stat = mean group = scores ;
+                   vline month / response = Unstable y2axis stat = mean group = scores ;
+                yaxis label = 'Percentage'; 
+                xaxis label = "Scores";
+
+                y2axis label = 'PSI' min = 0 max = 1 ;
+           run;
+           Title;
+     %mend;
+
+     proc sql;
+        create table _estimates_ as
+			select tranwrd(a.parameter,"_W"," ") as parameter,  b.NAME as scorecardvariable
+			from data&seg.._estimates_ a left outer join Lookup.Compscanvar_lookup b
+			on  upcase(a.Parameter) = cats(upcase(b.newcolumn),"_W");
+    quit;
+
+	Data _estimates_;
+		set _estimates_;
+		if parameter = "Intercept" then delete;
+		if scorecardvariable = " " then scorecardvariable = parameter;
+	run;
+
+	data _null_ ;
+		set _estimates_  ;
+		rownum= _n_;
+		call symput (compress("X"||rownum),upcase(Parameter));
+		call symput (compress("Y"||rownum),upcase(scorecardvariable));
+		call symput ('NumVars',compress(rownum));
+	run;
+
+	%do i = 1 %to &NumVars;
+	   %let var = &&X&i..;
+	   ods pdf startpage = now;
+	   ods layout start;
+	   ods region x = 1in y = 0in;
+	   ods text = "Performance Monitoring Segment&seg.: &&Y&i.." ;
+
+	   ods region y=0.5in x=0in width=4.5in height=4in;
+	   ods graphics / reset attrpriority=color;
+	   Title "Gini over Time";
+	   footnote "&&Y&i..";
+	   proc sort data=Ginis&seg;
+	         by Month;
+	   run;
+	   data ginitabletemp;;
+	         set Ginis&seg;
+	         where upcase(VarName) in ("OVERALLSEGMENT","&var"); 
+	         varname = tranwrd(varname,upcase("&var"),upcase("&&Y&i.."));
+	   run;
+	   proc sgplot data= ginitabletemp;
+	         series x=Month y=Gini / group= Varname  lineattrs= (pattern=solid Thickness = 2  ) ;
+	         yaxis min = 0  grid offsetmin=.05 offsetmax=.05;
+	         xaxis  grid  ;
+			 xaxis label = "Scores";
+	         keylegend / Title = '' ;
+	   run;
+	   Title;
+	   footnote;
+
+	   ods region y=0.5in x=5in width=4.5in height=4in;
+
+	   Title "Bad Rate Slope";
+	   footnote "Latest FirstDueMonth with full outcome"; 
+	   proc sgplot data= Variables_trendreport_seg&seg;
+	         where  upcase(VarName) in ("&var._S") and  segment = &seg ;
+	         vbar Bin / response = volume stat = percent  NOSTATLABEL    FILLATTRS=(color = VLIGB ) ;
+	         vline Bin / response=badrate y2axis stat = mean NOSTATLABEL lineattrs= (pattern=solid Thickness = 2 color = gray)   ;
+	         y2axis min = 0  grid;
+	         yaxis min = 0  grid ;
+			 xaxis label = "Scores";
+	   run;
+	   Title;
+	   footnote;
+
+	   ods region y=4.5in x=0in width=4.5in height=4in;
+	   %plotpsi(var=&var,title1=Application Distribution,dset=summarytable_&seg) ;
+
+	   ods region y=4.5in x=5in width=4.5in height=4in;
+	   ods graphics / reset attrpriority=color;
+	   Title "Trends Over Time";
+	   proc sort data=Variables_trendreport_seg&seg;
+	         by Month;
+	   run;
+	   proc sgplot data= Variables_trendreport_seg&seg;
+	         where upcase(VarName) in ("&var._S") and segment = &seg; 
+	         series x=Month y=BadRate / group= BIN  lineattrs= (pattern=solid Thickness = 2  );
+	         xaxis grid ;
+			 xaxis label = "Scores";
+	         yaxis min = 0  grid offsetmin=.05 offsetmax=.05;
+	   run;
+	   Title;
+	   ods LAYOUT END ;
+	%end;
+%mend;
+
+/*data disb1 disb2 disb3 disb4 disb5;*/
+/*      set Disbursedbase5;*/
+/*	  seg = comp_seg;*/
+/*      if seg = 1 then output disb1;*/
+/*      else if seg = 2 then output disb2;*/
+/*      else if seg = 3 then output disb3;*/
+/*      else if seg = 4 then output disb4;*/
+/*      else if seg = 5 then output disb5;*/
+/*run;*/
+
+/*** INSTITUTION CODE BASES ***/
+data BNKABS BNKCAP BNKFNB BNKNED BNKOTH BNKSTD;
+     SET Disbursedbase5;
+     if INSTITUTIONCODE = 'BNKABS' then output BNKABS;
+     else if INSTITUTIONCODE = 'BNKCAP' then output BNKCAP;
+     else if INSTITUTIONCODE = 'BNKFNB' then output BNKFNB;
+     else if INSTITUTIONCODE = 'BNKNED' then output BNKNED;
+     else if INSTITUTIONCODE = 'BNKOTH' then output BNKOTH;
+     else if INSTITUTIONCODE = 'BNKSTD' then output BNKSTD;
+run;
+
+
+/*** Create V5 monitoring Full Pack ***/
+options nodate nonumber;
+Title ; 
+TITLE1; TITLE2;
+Footnote;
+Footnote1;
+Footnote2;
+options orientation=landscape;
+ods pdf body = "&reports\V5 monitoring Full Pack &month..pdf"  ;
+     ods pdf startpage = now;
+     ods layout start;
+     ods region y=0in x=0in width=4in height=4in;
+     %VarCheckConfidenceBand1(Disbursedbase5, month, V655 , target , Principaldebt ,0,0,4,4, Overall Model ) ;
+     ods region y=0in x=4.5in width=4in height=4in;
+     %VarCheckConfidenceBand1(Disbursedbase5, seg, V655 , target , Principaldebt ,0,0,4,4, Segments ) ;
+     ods region y=4.5in x=0in width=4in height=4in;
+     %VarCheckConfidenceBand1(Disbursedbase5,Decile , V655 , target , Principaldebt ,0,0,4,4, Overall Decile ) ;
+     ods region y=4.5in x=4.5in width=4in height=4in;
+     %VarCheckConfidenceBand1(Disbursedbase5, V655_RiskGroup, V655 , target , Principaldebt ,0,0,4,4, Risk Group ) ;
+     ods layout end ;
+     ods pdf startpage = now;
+     ods layout start;
+     ods region y=0in x=0in width=4in height=4in;
+     %VarCheckConfidenceBand1(Disbursedbase5, INSTITUTIONCODE , V655 , target , Principaldebt ,0,0,4,4, INSTITUTION CODE) ;
+     ods region y=0in x=4.5in width=4in height=4in;
+     %VarCheckConfidenceBand1(BNKSTD, month, V655 , target , Principaldebt ,0,4.5,4,4, BNKSTD ) ;
+     ods region y=4.5in x=0in width=4in height=4in;
+     %VarCheckConfidenceBand1(BNKFNB, month, V655 , target , Principaldebt ,4.5,0,4,4, BNKFNB ) ;
+     ods region y=4.5in x=4.5in width=4in height=4in;
+     %VarCheckConfidenceBand1(BNKNED, month, V655 , target , Principaldebt ,4.5,4.5,4,4, BNKNED ) ;
+     ods layout end ;
+     ods pdf startpage = now;
+     ods layout start;
+     ods region y=0in x=0in width=4in height=4in;
+     %VarCheckConfidenceBand1(BNKABS, month , V655 , target , Principaldebt ,0,0,4,4, BNKABS) ;
+     ods region y=0in x=4.5in width=4in height=4in;
+     %VarCheckConfidenceBand1(BNKCAP, month, V655 , target , Principaldebt ,0,4.5,4,4, BNKCAP ) ;
+     ods region y=4.5in x=0in width=4in height=4in;
+     %VarCheckConfidenceBand1(BNKOTH, month, V655 , target , Principaldebt ,0,0,4,4, BNKOTH ) ;
+     ods layout end ;
+
+     ods pdf startpage = now;
+     ods layout start;
+     ods region y=0in x=0in width=4in height=4in;
+     %VarCheckConfidenceBand1(disb1, month , V655 , target , Principaldebt ,0,0,4,4, SEGMENT 1 ) ;
+     ods region y=0in x=4.5in width=4in height=4in;
+     %VarCheckConfidenceBand1(disb2, month, V655 , target , Principaldebt ,0,4.5,4,4, SEGMENT 2 ) ;
+     ods region y=4.5in x=0in width=4in height=4in;
+     %VarCheckConfidenceBand1(disb3, month, V655 , target , Principaldebt ,4.5,0,4,4, SEGMENT 3) ;
+     ods region y=4.5in x=4.5in width=4in height=4in;
+     %VarCheckConfidenceBand1(disb4, month, V655 , target , Principaldebt ,4.5,4.5,4,4, SEGMENT 4 ) ;
+     ods layout end ;
+     ods pdf startpage = now;
+     ods layout start;
+     ods region y=0in x=0in width=4in height=4in;
+     %VarCheckConfidenceBand1(disb5, month, V655 , target , Principaldebt ,0,0,4,4, SEGMENT 5 ) ;
+     ods region y=0in x=4.5in width=4in height=4in;
+     %VarCheckConfidenceBand1(disb1, decile_b , V655 , target , Principaldebt ,0,0,4,4, SEGMENT 1: Decile ) ;
+     ods region y=4.5in x=0in width=4in height=4in;
+     %VarCheckConfidenceBand1(disb2, decile_b, V655 , target , Principaldebt ,0,4.5,4,4, SEGMENT 2: Decile ) ;
+     ods region y=4.5in x=4.5in width=4in height=4in;
+     %VarCheckConfidenceBand1(disb3, decile_b, V655 , target , Principaldebt ,4.5,0,4,4, SEGMENT 3: Decile) ;
+     ods layout end ;
+     ods pdf startpage = now;
+     ods layout start;
+     ods region y=0in x=0in width=4in height=4in;
+     %VarCheckConfidenceBand1(disb4, decile_b, V655 , target , Principaldebt ,4.5,4.5,4,4, SEGMENT 4: Decile ) ;
+     ods region y=0in x=4.5in width=4in height=4in;
+     %VarCheckConfidenceBand1(disb5, decile_b, V655 , target , Principaldebt ,0,0,4,4, SEGMENT 5: Decile ) ;
+     ods layout end ;
+     %buildreport(1);
+     %plotconfidencebands(inputdata=disb1, segment=1);
+     %buildreport(2);
+     %plotconfidencebands(inputdata=disb2, segment=2);
+     %buildreport(3);
+     %plotconfidencebands(inputdata=disb3, segment=3);
+     %buildreport(4);
+     %plotconfidencebands(inputdata=disb4, segment=4);
+     %buildreport(5);
+     %plotconfidencebands(inputdata=disb5, segment=5);
+ods pdf close;
